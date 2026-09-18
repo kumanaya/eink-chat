@@ -205,6 +205,8 @@ Details that come from reading `run.c` ([karpathy/llama2.c](https://github.com/k
 ```
 chat.sh              scriptlet: install in /mnt/us/documents/
 chat.conf            prompt, steps, temperature, layout, timeouts
+chat-ui.c            native GTK window over llama-server, no KOReader
+chat-ui.sh           scriptlet: opens the native window from the library
 build.ps1            builds on Windows (Zig, no WSL)
 build.sh             builds on Linux/WSL/macOS (Zig or koxtoolchain)
 docs/engineering.md  this file: the measurements behind the app
@@ -212,11 +214,13 @@ docs/model-choice.md which model can actually be a chat here, with the numbers
 tools/fetch.ps1      downloads the dependencies on Windows
 tools/fetch.sh       downloads the dependencies (Linux/WSL)
 tools/build-llamacpp.sh  cross-compiles the chat runtime (llama.cpp)
+tools/build-chatui.sh    compiles the GTK window (host or Kindle)
 tools/quantize.py    converts the v0 fp32 model -> v2 Q8_0 (no PyTorch)
 tools/deploy.ps1     copies everything to a connected Kindle, verifying hashes
 tools/probe-device.sh collects info from the Kindle (run it on the device)
 tools/inspect-elf.py checks whether the binary works on the Kindle
 tests/functional.sh  test of chat.sh on the PC, with a fake binary
+tests/chatui-smoke.sh  build + parsing self-test + a headless window run
 vendor/              llama2.c code (run.c, runq.c) + tokenizer.bin
 model/               weights (not versioned)
 out/                 compiled binaries (not versioned)
@@ -224,7 +228,8 @@ out/                 compiled binaries (not versioned)
 kindlechat.koplugin/ the chat UI as a KOReader plugin (AGPL-3.0)
 ```
 
-The interface lives in `kindlechat.koplugin/`, deployed to `koreader/plugins/`.
+The main interface lives in `kindlechat.koplugin/`, deployed to
+`koreader/plugins/`. The KOReader-free one is `chat-ui.c` / `chat-ui.sh`.
 
 `chat.sh` accepts `APP_DIR` via environment variable, which allows testing it
 outside the Kindle without touching `/mnt/us`.
@@ -393,6 +398,34 @@ Everything in `chat.conf` (it is shell, loaded with `.`):
 > with `tools/inspect-elf.py` **and executed on the KT4 successfully** - the Zig/musl
 > route works and needs no toolchain. `TARGET=kindlehf` with koxtoolchain (glibc)
 > stays as plan B, in case a future build fails due to libc.
+
+## The native window (no KOReader)
+
+The plugin route answers "how do I get a chat UI for free". The other question
+is what happens without KOReader - and the Kindle already has a toolkit: the
+framework runs X, and its own UI is GTK. `chat-ui.c` is a GTK 3 window that
+talks to `llama-server` over HTTP and streams the answer into chat bubbles, so
+the transcript, the scrolling and the keyboard are library widgets instead of
+pixels drawn by hand.
+
+- **Input.** An on-screen QWERTY (shift, backspace, enter) built from a static
+  layout in C, so nothing depends on the framework. The native keyboard can be
+  borrowed instead with `lipc-set-prop com.lab126.keyboard open <appID>:abc:1`
+  (`--native-keyboard`): the window is an X client, so the key events land on
+  the focused entry.
+- **Model process.** A per-turn `llama-completion` reloads the 101 MB from
+  flash every time. The window starts `llama-server` once on `127.0.0.1:8080`
+  and speaks the OpenAI-compatible `/v1/chat/completions` with
+  `"stream": true`, parsing the SSE deltas; the process stays warm and the
+  1024-token context lives in the server.
+- **E-ink.** GTK draws through X; the refresh strategy is the framework's.
+  `--refresh-cmd` exists so a full-panel refresh (`fbink -s`) can run after each
+  answer, where ghosting accumulates.
+- **What is missing.** The host build, the parsing self-test and a headless
+  window run (`tests/chatui-smoke.sh`) pass; the `--kindle` build is wired to
+  koxtoolchain. It has not run on the KT4 yet: binary size with GTK, X repaint
+  behavior on e-ink and real keyboard latency are the numbers to collect on the
+  device.
 
 ## What's missing
 

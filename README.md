@@ -9,6 +9,7 @@
   <img src="https://img.shields.io/badge/Kindle-e--ink-111111?style=flat-square" alt="Kindle" />
   <img src="https://img.shields.io/badge/llama2.c-story-6b6b6b?style=flat-square" alt="llama2.c story mode" />
   <img src="https://img.shields.io/badge/llama.cpp-chat-6b6b6b?style=flat-square" alt="llama.cpp chat mode" />
+  <img src="https://img.shields.io/badge/GTK%203-native%20window-6b6b6b?style=flat-square" alt="GTK 3 native window" />
   <img src="https://img.shields.io/badge/License-MIT%20%2B%20AGPL--3.0-yellow.svg?style=flat-square" alt="MIT + AGPL-3.0" />
 </p>
 
@@ -16,6 +17,8 @@
   <a href="#on-the-kindle">On the Kindle</a>
   ·
   <a href="#on-your-desk">On your desk</a>
+  ·
+  <a href="#the-native-window">The native window</a>
   ·
   <a href="#the-two-modes">The two modes</a>
   ·
@@ -36,6 +39,8 @@ Two modes, picked by what is installed on the device:
 The interface is `kindlechat.koplugin/`: a KOReader plugin, so the keyboard,
 the scrolling and the e-ink refresh are KOReader's own. The app it drives is
 the rest of this repository, deployed to `/mnt/us/extensions/kindlechat`.
+There is also a KOReader-free window — `chat-ui.c`, a GTK app with its own
+keyboard — see [The native window](#the-native-window).
 
 Status: story mode measured **8.2 tok/s on a KT4**. Chat mode is built,
 deployed and running; its speed on the device is the outstanding measurement.
@@ -75,6 +80,25 @@ cp -r kindlechat.koplugin /path/to/koreader/plugins/
 Restart KOReader, then **Tools → E-INK HACK**. The plugin starts the runner
 under `/mnt/us/extensions/kindlechat` and polls the output back onto the
 screen.
+
+### The native window
+
+`chat-ui` is a GTK window that talks to `llama-server` directly: no KOReader.
+
+```
+out/chat-ui-kindle  →  /mnt/us/extensions/kindlechat/chat-ui
+chat-ui.sh          →  /mnt/us/documents/chat-ui.sh
+```
+
+Eject. It shows up as **E-INK HACK CHAT**. The window is GTK over the X server
+the framework already runs, so the transcript, the scrolling and the keyboard
+are ordinary widgets; the answer streams in as chat bubbles while the model
+writes. It starts and stops `llama-server` itself when nothing is listening on
+`127.0.0.1:8080`, and brings its own QWERTY (with shift and backspace). To use
+the framework's keyboard instead, start it once with `--native-keyboard`.
+
+Build the binary with `sh tools/build-chatui.sh --kindle` — the script prints
+the koxtoolchain steps when the cross compiler is missing.
 
 ### Chat mode
 
@@ -128,6 +152,15 @@ And inside a real headless KOReader (uses the `dev-tools` folder from the
 sh ../dev-tools/koreader-headless.sh kindlechat.koplugin kindlechat.koplugin/tests/koreader-probe.lua
 ```
 
+The native window is a GTK app, built and tested apart (needs the GTK 3
+development files):
+
+```sh
+sh tools/build-chatui.sh          # -> out/chat-ui
+sh tests/chatui-smoke.sh          # parsing tests + a headless window run
+./out/chat-ui                     # starts llama-server itself when it finds a .gguf
+```
+
 ## The two modes
 
 | | story | chat |
@@ -165,6 +198,11 @@ The layout is guessed for the KT4's 800x600 panel; adjust `STREAM_LINE` and
 `STATUS_LINE` if text runs off the screen. `chat.sh` prefers the fp32 pair on
 purpose (it measured faster); uncomment `BIN`/`MODEL` in `chat.conf` to force
 the Q8_0 pair.
+
+The native window has its own knobs (`./out/chat-ui --help`): `--font-size`,
+`--max-turns` (messages kept in the request), `--no-spawn`, `--server-bin`,
+`--server-args` and `--refresh-cmd` (an e-ink housekeeping command run after
+each answer).
 
 ---
 
