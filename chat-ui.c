@@ -1,12 +1,14 @@
-/* chat-ui.c -- E-INK CHAT: a small GTK 3 chat window over llama-server.
+/* chat-ui.c -- E-INK CHAT: a small GTK chat window over llama-server.
  *
  * The rest of the project runs the model. This is its face: a transcript of
  * chat bubbles, an entry line and an on-screen keyboard, drawn with the toolkit
  * the Kindle's own UI uses (GTK over X). It talks to llama-server over HTTP and
  * streams the answer in token by token, so nothing here depends on KOReader.
  *
- * The Kindle already has everything it needs: libgtk-3, curl and the X server
- * the framework runs. On a PC the same binary is the development UI.
+ * The same source builds against GTK 3 (a PC, this repository's host build) and
+ * GTK 2 (the Kindle SDK, which is GTK 2 only). The GTK 3 path adds CSS; the
+ * GTK 2 path styles widgets the old way (modify_bg/modify_font), so the two
+ * look different but behave the same.
  *
  * Usage:
  *   chat-ui [--app-dir DIR] [--host H] [--port N] [--model FILE]
@@ -27,7 +29,7 @@
 #include <signal.h>
 #include <sys/types.h>
 
-#define CHATUI_VERSION "0.1.0"
+#define CHATUI_VERSION "0.2.0"
 #define APP_ID "com.kumanaya.einkchat"
 #define DEFAULT_APP_DIR "/mnt/us/extensions/kindlechat"
 #define DEFAULT_SYSTEM "You are a helpful assistant running on a Kindle e-reader. Answer in plain text, briefly."
@@ -58,6 +60,131 @@ static struct {
     .max_turns = 10,
     .keyboard_on = TRUE,
 };
+
+/* --- GTK 2 / GTK 3 shims -------------------------------------------------- */
+
+#if GTK_MAJOR_VERSION < 3
+#define gtk_box_new(o, s) \
+    ((o) == GTK_ORIENTATION_HORIZONTAL ? gtk_hbox_new(FALSE, (s)) : gtk_vbox_new(FALSE, (s)))
+#endif
+
+static GtkWidget *box_new(GtkOrientation orientation, gint spacing) {
+    return gtk_box_new(orientation, spacing);
+}
+
+static void widget_set_visible(GtkWidget *w, gboolean visible) {
+    if (visible) gtk_widget_show(w);
+    else gtk_widget_hide(w);
+}
+
+static gboolean widget_is_visible(GtkWidget *w) {
+#if GTK_MAJOR_VERSION >= 3
+    return gtk_widget_get_visible(w);
+#else
+    return GTK_WIDGET_VISIBLE(w);
+#endif
+}
+
+static void widget_add_class(GtkWidget *w, const char *cls) {
+#if GTK_MAJOR_VERSION >= 3
+    gtk_style_context_add_class(gtk_widget_get_style_context(w), cls);
+#else
+    (void)w;
+    (void)cls;
+#endif
+}
+
+static void label_set_xalign(GtkWidget *label, float x) {
+#if GTK_MAJOR_VERSION >= 3
+    gtk_label_set_xalign(GTK_LABEL(label), x);
+#else
+    gtk_misc_set_alignment(GTK_MISC(label), x, 0.5f);
+#endif
+}
+
+static void label_set_padding(GtkWidget *label, gint xpad, gint ypad) {
+#if GTK_MAJOR_VERSION >= 3
+    gtk_widget_set_margin_start(label, xpad);
+    gtk_widget_set_margin_end(label, xpad);
+    gtk_widget_set_margin_top(label, ypad);
+    gtk_widget_set_margin_bottom(label, ypad);
+#else
+    gtk_misc_set_padding(GTK_MISC(label), xpad, ypad);
+#endif
+}
+
+static void widget_set_bold(GtkWidget *w) {
+#if GTK_MAJOR_VERSION < 3
+    PangoFontDescription *font =
+        pango_font_description_from_string(g_strdup_printf("Sans Bold %d", cfg.font_size));
+    gtk_widget_modify_font(w, font);
+    pango_font_description_free(font);
+#else
+    (void)w;
+#endif
+}
+
+static void widget_set_color(GtkWidget *w, const char *color) {
+#if GTK_MAJOR_VERSION < 3
+    GdkColor c;
+    if (gdk_color_parse(color, &c)) gtk_widget_modify_fg(w, GTK_STATE_NORMAL, &c);
+#else
+    (void)w;
+    (void)color;
+#endif
+}
+
+static void load_style(void) {
+#if GTK_MAJOR_VERSION >= 3
+    char *css = g_strdup_printf(
+        "window { background-color: #ffffff; }\n"
+        ".header { background-color: #111111; padding: 6px 10px; }\n"
+        ".header label { color: #ffffff; font-weight: bold; font-size: %dpx; }\n"
+        ".header .status { font-size: %dpx; font-weight: normal; }\n"
+        ".bubble { border-radius: 10px; padding: 8px 10px; margin: 3px 8px; font-size: %dpx; }\n"
+        ".bubble.user { background-color: #dcdcdc; margin-left: 70px; }\n"
+        ".bubble.bot { background-color: #f4f4f4; border: 1px solid #b0b0b0; margin-right: 70px; }\n"
+        ".keyboard { padding: 2px 4px 6px 4px; }\n"
+        "#entry { font-size: %dpx; }",
+        cfg.font_size, cfg.font_size - 3, cfg.font_size, cfg.font_size);
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(provider, css, -1, NULL);
+    gtk_style_context_add_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(provider),
+                                              GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+    g_free(css);
+#else
+    char *rc = g_strdup_printf(
+        "style \"chatui-font\" { font_name = \"Sans %d\" }\n"
+        "widget_class \"*\" style \"chatui-font\"\n",
+        cfg.font_size);
+    gtk_rc_parse_string(rc);
+    g_free(rc);
+#endif
+}
+
+static void style_header(GtkWidget *header) {
+#if GTK_MAJOR_VERSION >= 3
+    widget_add_class(header, "header");
+#else
+    GdkColor black;
+    gdk_color_parse("#111111", &black);
+    gtk_widget_modify_bg(header, GTK_STATE_NORMAL, &black);
+#endif
+}
+
+static void style_bubble(GtkWidget *bubble, const char *role) {
+#if GTK_MAJOR_VERSION >= 3
+    gchar *cls = g_strdup_printf("bubble %s", role);
+    widget_add_class(bubble, cls);
+    g_free(cls);
+#else
+    GdkColor c;
+    if (g_strcmp0(role, "user") == 0) gdk_color_parse("#dcdcdc", &c);
+    else gdk_color_parse("#f4f4f4", &c);
+    gtk_widget_modify_bg(bubble, GTK_STATE_NORMAL, &c);
+#endif
+}
 
 /* --- state ---------------------------------------------------------------- */
 
@@ -210,17 +337,28 @@ static char *sse_error_message(const char *line) {
 static void scroll_to_bottom(void);
 
 static GtkWidget *add_bubble(const char *role, const char *text) {
-    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *row = box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *spacer = box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *bubble = gtk_event_box_new();
     GtkWidget *label = gtk_label_new(text);
-    gchar *cls = g_strdup_printf("bubble %s", role);
-    gtk_style_context_add_class(gtk_widget_get_style_context(label), cls);
-    g_free(cls);
+    gboolean user = g_strcmp0(role, "user") == 0;
+
+    style_bubble(bubble, role);
     gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
     gtk_label_set_line_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
-    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
-    gtk_widget_set_halign(label, g_strcmp0(role, "user") == 0 ? GTK_ALIGN_END : GTK_ALIGN_START);
     gtk_label_set_selectable(GTK_LABEL(label), FALSE);
-    gtk_box_pack_start(GTK_BOX(row), label, FALSE, FALSE, 0);
+    label_set_xalign(label, 0.0f);
+    label_set_padding(label, 8, 4);
+    gtk_container_add(GTK_CONTAINER(bubble), label);
+    gtk_container_set_border_width(GTK_CONTAINER(bubble), 1);
+
+    if (user) {
+        gtk_box_pack_start(GTK_BOX(row), spacer, TRUE, TRUE, 0);
+        gtk_box_pack_end(GTK_BOX(row), bubble, FALSE, FALSE, 6);
+    } else {
+        gtk_box_pack_start(GTK_BOX(row), bubble, FALSE, FALSE, 6);
+        gtk_box_pack_end(GTK_BOX(row), spacer, TRUE, TRUE, 0);
+    }
     gtk_box_pack_start(GTK_BOX(transcript), row, FALSE, FALSE, 0);
     gtk_widget_show_all(row);
     scroll_to_bottom();
@@ -230,7 +368,11 @@ static GtkWidget *add_bubble(const char *role, const char *text) {
 static gboolean scroll_idle(gpointer data) {
     (void)data;
     if (vadj) {
+#if GTK_MAJOR_VERSION >= 3
         gdouble bottom = gtk_adjustment_get_upper(vadj) - gtk_adjustment_get_page_size(vadj);
+#else
+        gdouble bottom = vadj->upper - vadj->page_size;
+#endif
         if (bottom > 0) gtk_adjustment_set_value(vadj, bottom);
     }
     return G_SOURCE_REMOVE;
@@ -313,20 +455,19 @@ static void keyboard_key(GtkWidget *btn, gpointer data) {
 
 static GtkWidget *kbd_button(const char *label, const char *action, gboolean wide) {
     GtkWidget *btn = gtk_button_new_with_label(label);
-    gtk_style_context_add_class(gtk_widget_get_style_context(btn), "key");
-    gtk_widget_set_hexpand(btn, wide);
+    gtk_widget_set_size_request(btn, wide ? 200 : 34, 44);
     g_signal_connect(btn, "clicked", G_CALLBACK(keyboard_key), (gpointer)action);
     return btn;
 }
 
 static GtkWidget *build_keyboard(void) {
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-    gtk_style_context_add_class(gtk_widget_get_style_context(box), "keyboard");
+    GtkWidget *box = box_new(GTK_ORIENTATION_VERTICAL, 2);
+    widget_add_class(box, "keyboard");
     kbd_letters = g_ptr_array_new();
     kbd_chars = g_string_new(NULL);
 
     for (guint r = 0; r < G_N_ELEMENTS(kbd_rows); r++) {
-        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+        GtkWidget *row = box_new(GTK_ORIENTATION_HORIZONTAL, 2);
         for (const char *c = kbd_rows[r]; *c; c++) {
             char label[2] = { *c, 0 };
             GtkWidget *btn = kbd_button(label, "", FALSE);
@@ -337,7 +478,7 @@ static GtkWidget *build_keyboard(void) {
         gtk_box_pack_start(GTK_BOX(box), row, TRUE, TRUE, 0);
     }
 
-    GtkWidget *row3 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    GtkWidget *row3 = box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     shift_btn = kbd_button("Shift", "shift", FALSE);
     gtk_box_pack_start(GTK_BOX(row3), shift_btn, FALSE, FALSE, 0);
     for (const char *c = kbd_row3; *c; c++) {
@@ -350,7 +491,7 @@ static GtkWidget *build_keyboard(void) {
     gtk_box_pack_start(GTK_BOX(row3), kbd_button("Bksp", "bksp", FALSE), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(box), row3, TRUE, TRUE, 0);
 
-    GtkWidget *row4 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    GtkWidget *row4 = box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     gtk_box_pack_start(GTK_BOX(row4), kbd_button(",", "", FALSE), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(row4), kbd_button("Space", "space", TRUE), TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(row4), kbd_button(".", "", FALSE), FALSE, FALSE, 0);
@@ -363,8 +504,7 @@ static GtkWidget *build_keyboard(void) {
 static void toggle_keyboard(GtkWidget *btn, gpointer data) {
     (void)btn;
     (void)data;
-    gboolean visible = gtk_widget_get_visible(kbd_box);
-    gtk_widget_set_visible(kbd_box, !visible);
+    widget_set_visible(kbd_box, !widget_is_visible(kbd_box));
 }
 
 /* --- server --------------------------------------------------------------- */
@@ -640,7 +780,7 @@ static void finish_turn(void) {
     streaming = FALSE;
     gtk_widget_set_sensitive(entry, TRUE);
     gtk_widget_set_sensitive(send_btn, TRUE);
-    gtk_widget_set_visible(stop_btn, FALSE);
+    widget_set_visible(stop_btn, FALSE);
     gtk_widget_grab_focus(entry);
 
     if (request_path) {
@@ -717,7 +857,7 @@ static void send_clicked(GtkWidget *btn, gpointer data) {
     streaming = TRUE;
     gtk_widget_set_sensitive(entry, FALSE);
     gtk_widget_set_sensitive(send_btn, FALSE);
-    gtk_widget_set_visible(stop_btn, TRUE);
+    widget_set_visible(stop_btn, TRUE);
     set_status("thinking...");
 
     GString *request = build_request();
@@ -749,49 +889,34 @@ static void on_destroy(GtkWidget *w, gpointer data) {
     gtk_main_quit();
 }
 
-static void load_css(void) {
-    char *css = g_strdup_printf(
-        "window { background-color: #ffffff; }\n"
-        ".header { background-color: #111111; padding: 6px 10px; }\n"
-        ".header label { color: #ffffff; font-weight: bold; font-size: %dpx; }\n"
-        ".header .status { font-size: %dpx; font-weight: normal; }\n"
-        ".bubble { border-radius: 10px; padding: 8px 10px; margin: 3px 8px; font-size: %dpx; }\n"
-        ".bubble.user { background-color: #dcdcdc; margin-left: 70px; }\n"
-        ".bubble.bot { background-color: #f4f4f4; border: 1px solid #b0b0b0; margin-right: 70px; }\n"
-        ".key { min-height: 46px; min-width: 30px; padding: 0 4px; font-size: %dpx; }\n"
-        ".keyboard { padding: 2px 4px 6px 4px; }\n"
-        "#entry { font-size: %dpx; }",
-        cfg.font_size, cfg.font_size - 3, cfg.font_size, cfg.font_size, cfg.font_size);
-    GtkCssProvider *provider = gtk_css_provider_new();
-    gtk_css_provider_load_from_data(provider, css, -1, NULL);
-    gtk_style_context_add_provider_for_screen(gdk_screen_get_default(), GTK_STYLE_PROVIDER(provider),
-                                              GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    g_object_unref(provider);
-    g_free(css);
-}
-
 static void build_ui(void) {
-    load_css();
+    load_style();
 
     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(window), "E-INK CHAT");
     gtk_window_set_default_size(GTK_WINDOW(window), 600, 800);
     if (!cfg.fullscreen) gtk_window_set_decorated(GTK_WINDOW(window), TRUE);
 
-    GtkWidget *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *root = box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_container_add(GTK_CONTAINER(window), root);
 
-    GtkWidget *header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_style_context_add_class(gtk_widget_get_style_context(header), "header");
+    GtkWidget *header = gtk_event_box_new();
+    style_header(header);
+    GtkWidget *header_row = box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_container_add(GTK_CONTAINER(header), header_row);
     GtkWidget *title = gtk_label_new("E-INK CHAT");
-    gtk_box_pack_start(GTK_BOX(header), title, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(header_row), title, FALSE, FALSE, 0);
     status_label = gtk_label_new("starting...");
-    gtk_style_context_add_class(gtk_widget_get_style_context(status_label), "status");
-    gtk_box_pack_end(GTK_BOX(header), status_label, FALSE, FALSE, 0);
+    widget_add_class(status_label, "status");
+    gtk_box_pack_end(GTK_BOX(header_row), status_label, FALSE, FALSE, 0);
+    label_set_padding(title, 4, 4);
+    label_set_padding(status_label, 4, 4);
+    widget_set_bold(title);
+    widget_set_color(title, "#ffffff");
+    widget_set_color(status_label, "#ffffff");
     gtk_box_pack_start(GTK_BOX(root), header, FALSE, FALSE, 0);
 
-    transcript = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_valign(transcript, GTK_ALIGN_START);
+    transcript = box_new(GTK_ORIENTATION_VERTICAL, 2);
     scrolled = gtk_scrolled_window_new(NULL, NULL);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_container_add(GTK_CONTAINER(scrolled), transcript);
@@ -801,17 +926,18 @@ static void build_ui(void) {
     kbd_box = build_keyboard();
     gtk_box_pack_end(GTK_BOX(root), kbd_box, FALSE, FALSE, 0);
 
-    GtkWidget *input = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_style_context_add_class(gtk_widget_get_style_context(input), "input");
+    GtkWidget *input = box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    widget_add_class(input, "input");
     GtkWidget *kbd_toggle = gtk_button_new_with_label("Kbd");
     gtk_box_pack_start(GTK_BOX(input), kbd_toggle, FALSE, FALSE, 0);
     entry = gtk_entry_new();
     gtk_widget_set_name(entry, "entry");
+#if GTK_MAJOR_VERSION >= 3
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Ask something...");
-    gtk_widget_set_hexpand(entry, TRUE);
+#endif
     gtk_box_pack_start(GTK_BOX(input), entry, TRUE, TRUE, 0);
     stop_btn = gtk_button_new_with_label("Stop");
-    gtk_widget_set_visible(stop_btn, FALSE);
+    widget_set_visible(stop_btn, FALSE);
     gtk_box_pack_start(GTK_BOX(input), stop_btn, FALSE, FALSE, 0);
     send_btn = gtk_button_new_with_label("Send");
     gtk_widget_set_sensitive(send_btn, FALSE);
@@ -824,7 +950,7 @@ static void build_ui(void) {
     g_signal_connect(stop_btn, "clicked", G_CALLBACK(stop_clicked), NULL);
     g_signal_connect(window, "destroy", G_CALLBACK(on_destroy), NULL);
 
-    if (!cfg.keyboard_on) gtk_widget_set_visible(kbd_box, FALSE);
+    if (!cfg.keyboard_on) widget_set_visible(kbd_box, FALSE);
 }
 
 /* --- self test ------------------------------------------------------------ */
@@ -911,7 +1037,7 @@ int main(int argc, char **argv) {
     g_option_context_free(ctx);
 
     if (show_version) {
-        g_print("chat-ui %s\n", CHATUI_VERSION);
+        g_print("chat-ui %s (GTK %d)\n", CHATUI_VERSION, GTK_MAJOR_VERSION);
         return 0;
     }
     if (keyboard) cfg.keyboard_on = g_strcmp0(keyboard, "off") != 0;
