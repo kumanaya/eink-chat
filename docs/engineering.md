@@ -1,4 +1,7 @@
-# E-INK HACK
+# E-INK CHAT - engineering log
+
+The long story behind the app: measurements, dead ends and the numbers that
+chose the models. Commands run from the repository root.
 
 An offline chat that runs entirely on the Kindle. Two modes, picked by what is
 installed on the device:
@@ -10,7 +13,7 @@ installed on the device:
 
 Chat mode is the point of the project, and getting there needed both a different
 model and a different runtime. The reasoning, with the numbers, is in
-[docs/model-choice.md](docs/model-choice.md).
+[model-choice.md](model-choice.md).
 
 For the interface there is `kindlechat.koplugin`, a KOReader plugin, so the
 keyboard, the scrolling and the e-ink rendering are KOReader's own.
@@ -200,27 +203,28 @@ Details that come from reading `run.c` ([karpathy/llama2.c](https://github.com/k
 ## Structure
 
 ```
-kindlechat/
-  chat.sh              scriptlet: install in /mnt/us/documents/
-  chat.conf            prompt, steps, temperature, layout, timeouts
-  build.ps1            builds on Windows (Zig, no WSL)
-  build.sh             builds on Linux/WSL/macOS (Zig or koxtoolchain)
-  docs/model-choice.md which model can actually be a chat here, with the numbers
-  tools/fetch.ps1      downloads the dependencies on Windows
-  tools/fetch.sh       downloads the dependencies (Linux/WSL)
-  tools/build-llamacpp.sh  cross-compiles the chat runtime (llama.cpp)
-  tools/quantize.py    converts the v0 fp32 model -> v2 Q8_0 (no PyTorch)
-  tools/deploy.ps1     copies everything to a connected Kindle, verifying hashes
-  tools/probe-device.sh collects info from the Kindle (run it on the device)
-  tools/inspect-elf.py checks whether the binary works on the Kindle
-  tests/functional.sh  test of chat.sh on the PC, with a fake binary
-  vendor/              llama2.c code (run.c, runq.c) + tokenizer.bin
-  model/               weights (not versioned)
-  out/                 compiled binaries (not versioned)
+chat.sh              scriptlet: install in /mnt/us/documents/
+chat.conf            prompt, steps, temperature, layout, timeouts
+build.ps1            builds on Windows (Zig, no WSL)
+build.sh             builds on Linux/WSL/macOS (Zig or koxtoolchain)
+docs/engineering.md  this file: the measurements behind the app
+docs/model-choice.md which model can actually be a chat here, with the numbers
+tools/fetch.ps1      downloads the dependencies on Windows
+tools/fetch.sh       downloads the dependencies (Linux/WSL)
+tools/build-llamacpp.sh  cross-compiles the chat runtime (llama.cpp)
+tools/quantize.py    converts the v0 fp32 model -> v2 Q8_0 (no PyTorch)
+tools/deploy.ps1     copies everything to a connected Kindle, verifying hashes
+tools/probe-device.sh collects info from the Kindle (run it on the device)
+tools/inspect-elf.py checks whether the binary works on the Kindle
+tests/functional.sh  test of chat.sh on the PC, with a fake binary
+vendor/              llama2.c code (run.c, runq.c) + tokenizer.bin
+model/               weights (not versioned)
+out/                 compiled binaries (not versioned)
+
+kindlechat.koplugin/ the chat UI as a KOReader plugin (AGPL-3.0)
 ```
 
-The interface lives in the sibling `kindlechat.koplugin` directory, which is
-deployed to `koreader/plugins/`.
+The interface lives in `kindlechat.koplugin/`, deployed to `koreader/plugins/`.
 
 `chat.sh` accepts `APP_DIR` via environment variable, which allows testing it
 outside the Kindle without touching `/mnt/us`.
@@ -228,13 +232,13 @@ outside the Kindle without touching `/mnt/us`.
 ## Tests
 
 ```sh
-sh ../../dev-tools/check.sh .     # syntax, CRLF/BOM, scriptlet header
+sh ../dev-tools/check.sh .     # syntax, CRLF/BOM, scriptlet header
 sh tests/functional.sh         # runs chat.sh with a fake llama, without fbink
 ```
 
 The functional test checks that the model output is captured, that `tok/s` is extracted
 from stderr and shown, and that the arguments reach the binary with the right quoting
-(including a prompt with spaces). See `../../dev-tools/README.md`.
+(including a prompt with spaces). See `../dev-tools/README.md`.
 
 
 ## Step 1 - Download dependencies
@@ -530,6 +534,6 @@ straight from v0 fp32, without torch.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). The vendored llama2.c sources under `vendor/`
+MIT. See [LICENSE](../LICENSE). The vendored llama2.c sources under `vendor/`
 (`run.c`, `runq.c`, `tokenizer.bin`) keep their own MIT license, from
 [karpathy/llama2.c](https://github.com/karpathy/llama2.c).
