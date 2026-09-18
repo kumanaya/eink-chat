@@ -87,6 +87,7 @@ screen.
 
 ```
 out/chat-ui-kindle  →  /mnt/us/extensions/kindlechat/chat-ui
+out/llama-server    →  /mnt/us/extensions/kindlechat/llama-server
 chat-ui.sh          →  /mnt/us/documents/chat-ui.sh
 ```
 
@@ -97,8 +98,10 @@ writes. It starts and stops `llama-server` itself when nothing is listening on
 `127.0.0.1:8080`, and brings its own QWERTY (with shift and backspace). To use
 the framework's keyboard instead, start it once with `--native-keyboard`.
 
-Build the binary with `sh tools/build-chatui.sh --kindle` — the script prints
-the koxtoolchain steps when the cross compiler is missing.
+Build the window with `sh tools/build-chatui.sh --kindle` (koxtoolchain plus
+the Kindle SDK, which brings GTK 2 into the sysroot; the script prints the
+steps when something is missing) and the backend with
+`sh tools/build-llamacpp.sh --server` (Zig, static musl).
 
 ### Chat mode
 
@@ -156,9 +159,10 @@ The native window is a GTK app, built and tested apart (needs the GTK 3
 development files):
 
 ```sh
-sh tools/build-chatui.sh          # -> out/chat-ui
-sh tests/chatui-smoke.sh          # parsing tests + a headless window run
-./out/chat-ui                     # starts llama-server itself when it finds a .gguf
+sh tools/build-chatui.sh              # -> out/chat-ui
+sh tools/build-llamacpp.sh --server   # -> out/llama-server (ARM)
+sh tests/chatui-smoke.sh              # parsing tests + a headless window run
+./out/chat-ui                         # starts llama-server itself when it finds a .gguf
 ```
 
 ## The two modes

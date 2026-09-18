@@ -21,6 +21,9 @@ APP_DIR="${APP_DIR:-/mnt/us/extensions/kindlechat}"
 BIN="${CHATUI_BIN:-$APP_DIR/chat-ui}"
 LOG="$APP_DIR/chat-ui.log"
 
+# The window is an X client; the framework runs Xorg on :0.
+export DISPLAY="${DISPLAY:-:0}"
+
 FBINK="${FBINK:-/mnt/us/libkh/bin/fbink}"
 [ -x "$FBINK" ] || FBINK="$(command -v fbink 2>/dev/null)"
 

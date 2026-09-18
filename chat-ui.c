@@ -375,7 +375,7 @@ static gboolean scroll_idle(gpointer data) {
 #endif
         if (bottom > 0) gtk_adjustment_set_value(vadj, bottom);
     }
-    return G_SOURCE_REMOVE;
+    return FALSE;
 }
 
 static void scroll_to_bottom(void) {
@@ -606,17 +606,17 @@ static gboolean poll_health(gpointer data) {
         server_ready = TRUE;
         set_status("ready");
         gtk_widget_set_sensitive(send_btn, TRUE);
-        return G_SOURCE_REMOVE;
+        return FALSE;
     }
     if (!server_spawned) {
         set_status("server offline");
-        return G_SOURCE_REMOVE;
+        return FALSE;
     }
     if (++health_polls > 300) {
         set_status("server did not start");
-        return G_SOURCE_REMOVE;
+        return FALSE;
     }
-    return G_SOURCE_CONTINUE;
+    return TRUE;
 }
 
 static void spawn_server(void) {

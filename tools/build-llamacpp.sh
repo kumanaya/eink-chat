@@ -12,10 +12,12 @@
 #
 # Usage:
 #   sh tools/build-llamacpp.sh              # builds llama-completion
+#   sh tools/build-llamacpp.sh --server     # builds llama-server (chat-ui's backend)
 #   sh tools/build-llamacpp.sh --host       # same source, for this machine, to
 #                                           # try flags and prompts locally
 #
-# Output: out/llama-completion (ARM), or out/llama-completion-x86 for --host.
+# Output: out/llama-completion or out/llama-server (ARM), or
+#         out/<name>-x86 for --host.
 #
 # It takes a while: the source is large and this is a full C++ build.
 
@@ -24,17 +26,31 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TC="$HOME/tc"
 SRC="$HOME/llama.cpp"
-HOST=0
-[ "${1:-}" = "--host" ] && HOST=1
 
-if [ "$HOST" = "1" ]; then
+MODE=completion
+case "${1:-}" in
+    --host) MODE=host ;;
+    --server) MODE=server ;;
+esac
+
+if [ "$MODE" = "host" ]; then
     BUILD="$HOME/llama-build-x86"
     ZIG_TARGET=x86_64-linux-musl
     OUT_NAME=llama-completion-x86
+    BUILD_SERVER=OFF
+    TARGET=llama-completion
+elif [ "$MODE" = "server" ]; then
+    BUILD="$HOME/llama-build-server"
+    ZIG_TARGET=arm-linux-musleabihf
+    OUT_NAME=llama-server
+    BUILD_SERVER=ON
+    TARGET=llama-server
 else
     BUILD="$HOME/llama-build"
     ZIG_TARGET=arm-linux-musleabihf
     OUT_NAME=llama-completion
+    BUILD_SERVER=OFF
+    TARGET=llama-completion
 fi
 
 # --- 1. portable toolchain ---------------------------------------------------
@@ -96,7 +112,7 @@ chmod +x "$TC/bin/${OUT_NAME}-cc" "$TC/bin/${OUT_NAME}-cxx"
 
 cat > "$TC/${OUT_NAME}-toolchain.cmake" <<EOF
 set(CMAKE_SYSTEM_NAME Linux)
-set(CMAKE_SYSTEM_PROCESSOR $([ "$HOST" = "1" ] && echo x86_64 || echo arm))
+set(CMAKE_SYSTEM_PROCESSOR $([ "$MODE" = "host" ] && echo x86_64 || echo arm))
 set(CMAKE_C_COMPILER   $TC/bin/${OUT_NAME}-cc)
 set(CMAKE_CXX_COMPILER $TC/bin/${OUT_NAME}-cxx)
 # Cross-compiling: do not try to link the compiler-detection tests.
@@ -121,7 +137,7 @@ rm -rf "$BUILD"
     -DLLAMA_CURL=OFF \
     -DLLAMA_BUILD_TESTS=OFF \
     -DLLAMA_BUILD_EXAMPLES=OFF \
-    -DLLAMA_BUILD_SERVER=OFF \
+    -DLLAMA_BUILD_SERVER=$BUILD_SERVER \
     -DLLAMA_BUILD_TOOLS=ON > "$TC/configure.log" 2>&1 || {
         echo "configure failed; last lines:"; tail -20 "$TC/configure.log"; exit 1
     }
@@ -132,21 +148,21 @@ rm -rf "$BUILD"
 # Only the one target: the umbrella "llama" app also wants the server, which is
 # disabled, so it cannot link. llama-completion is the CLI we actually call.
 
-echo "=== building llama-completion (this takes a while) ==="
+echo "=== building $TARGET (this takes a while) ==="
 cd "$BUILD"
-if ! "$TC/ninja/ninja" llama-completion > "$TC/build.log" 2>&1; then
+if ! "$TC/ninja/ninja" "$TARGET" > "$TC/build.log" 2>&1; then
     echo "build failed; errors:"
     grep -E '^FAILED|error:' "$TC/build.log" | head -15
     exit 1
 fi
 
 mkdir -p "$ROOT/out"
-cp "$BUILD/bin/llama-completion" "$ROOT/out/$OUT_NAME"
+cp "$BUILD/bin/$TARGET" "$ROOT/out/$OUT_NAME"
 echo
 echo "=== built ==="
 ls -l "$ROOT/out/$OUT_NAME" | awk '{printf "  %s  %.1f MB\n", $9, $5/1024/1024}'
 
-if [ "$HOST" != "1" ]; then
+if [ "$MODE" != "host" ]; then
     echo
     echo "=== ELF check ==="
     python3 "$ROOT/tools/inspect-elf.py" "$ROOT/out/$OUT_NAME" || true

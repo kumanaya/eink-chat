@@ -421,11 +421,15 @@ pixels drawn by hand.
 - **E-ink.** GTK draws through X; the refresh strategy is the framework's.
   `--refresh-cmd` exists so a full-panel refresh (`fbink -s`) can run after each
   answer, where ghosting accumulates.
-- **What is missing.** The host build, the parsing self-test and a headless
-  window run (`tests/chatui-smoke.sh`) pass; the `--kindle` build is wired to
-  koxtoolchain. It has not run on the KT4 yet: binary size with GTK, X repaint
-  behavior on e-ink and real keyboard latency are the numbers to collect on the
-  device.
+- **Toolkit.** The source builds against GTK 3 (the PC) and GTK 2 (the Kindle
+  SDK does not ship GTK 3); CSS is the GTK 3 path only. The cross build is
+  koxtoolchain `kindlehf` plus the Kindle SDK overlaid into its sysroot, and the
+  backend is the same Zig/musl llama.cpp build (`tools/build-llamacpp.sh
+  --server`). The stripped ARM binary is 26 KB and links only firmware
+  libraries.
+- **What is missing.** It has not run on the KT4 yet: X repaint behavior on
+  e-ink, real keyboard latency and the 101 MB server load are the numbers to
+  collect on the device.
 
 ## What's missing
 
