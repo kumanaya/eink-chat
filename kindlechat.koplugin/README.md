@@ -15,8 +15,9 @@ what KOReader already solved, well, on this hardware. Reusing them means:
 - the whole UI is KOReader's, so it behaves like every other screen on the device.
 
 What the plugin does *not* do is run the model. That is still the llama2.c binary
-built by the sibling `kindlechat` project, under `/mnt/us/extensions/kindlechat`.
-This directory is only the interface to it.
+built by the app in the repository root (the scriptlet, builds and tooling),
+under `/mnt/us/extensions/kindlechat`. This directory is only the interface to
+it.
 
 ## Requirements
 
@@ -24,11 +25,11 @@ This directory is only the interface to it.
   `koreader/plugins/`).
 - The model app installed: `/mnt/us/extensions/kindlechat` with a `llama` (or
   `llama-q8`) binary, `model/tokenizer.bin` and one of the `stories15M` weights.
-  See the project README one level up for the build and deploy steps.
+  See the repository README for the build and deploy steps.
 
 ## Install
 
-`tools/deploy.ps1` in the sibling project copies this folder to
+`tools/deploy.ps1` in the repository root copies this folder to
 `koreader/plugins/kindlechat.koplugin/` and verifies every file. Then **restart
 KOReader** and open **Tools -> E-INK HACK**.
 
@@ -134,7 +135,7 @@ available.
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | No "E-INK HACK" under Tools | Plugin not loaded | Restart KOReader; check `koreader/plugins/kindlechat.koplugin/main.lua` exists |
-| "Cannot find the model under ..." | The app is not installed | Run `tools/deploy.ps1` from the sibling project |
+| "Cannot find the model under ..." | The app is not installed | Run `tools/deploy.ps1` from the repository root |
 | "Generating..." never ends | The runner never wrote the sentinel | Check `/tmp/kindlechat-out.txt` and `/tmp/kindlechat-out.txt.err` over SSH |
 | Wrong or garbled output | fp32/Q8 pair mismatch | The runner picks fp32 first; confirm both files of that pair exist |
 | Blank screen after opening | Very old KOReader without `ScrollTextWidget` | Update KOReader |
