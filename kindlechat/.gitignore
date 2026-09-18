@@ -1,0 +1,10 @@
+# Build output
+out/
+
+# Models (large). Fetch them with tools/fetch.sh
+model/
+
+# Runtime state on the device
+last.txt
+chat.log
+.tapped

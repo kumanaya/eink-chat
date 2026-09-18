@@ -1,0 +1,37 @@
+# Line ending rules for this repository.
+#
+# This is NOT cosmetic: a Kindle scriptlet MUST have LF in the working copy.
+# With Windows' default core.autocrlf=true, git would convert it on checkout and
+# the "#!/bin/sh" shebang would become a broken "#f/bin/sh" -> the scriptlet
+# opens as a book and does nothing, with no error message.
+#
+# That is why every text file is checked out with LF, on any system.
+# dev-tools/check.sh checks for CRLF precisely to catch this.
+
+* text=auto eol=lf
+
+*.sh         text eol=lf
+*.conf       text eol=lf
+*.ps1        text eol=lf
+*.py         text eol=lf
+*.c          text eol=lf
+*.h          text eol=lf
+*.lua        text eol=lf
+*.md         text eol=lf
+*.json       text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.txt        text eol=lf
+.gitignore   text eol=lf
+.gitattributes text eol=lf
+
+# Binaries: never convert, never try to diff
+*.bin  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.exe  binary
+*.zip  binary
+*.gz   binary
+*.xz   binary
