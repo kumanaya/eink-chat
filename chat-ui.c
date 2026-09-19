@@ -590,10 +590,29 @@ static gboolean have_lipc(void) {
     return cached == 1;
 }
 
+static void reap_child(GPid pid, gint status, gpointer data) {
+    (void)status;
+    (void)data;
+    g_spawn_close_pid(pid);
+}
+
+/* Fire and forget: a hung lipc-set-prop must never freeze the UI thread. */
+static void run_async(const char *cmd) {
+    gchar *argv[] = { "/bin/sh", "-c", (gchar *)cmd, NULL };
+    GError *err = NULL;
+    GPid pid = 0;
+    if (g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD,
+                      NULL, NULL, &pid, &err)) {
+        g_child_watch_add(pid, reap_child, NULL);
+    } else if (err) {
+        g_error_free(err);
+    }
+}
+
 static void powerd_keepalive(gboolean on) {
     if (!have_lipc()) return;
     char *cmd = g_strdup_printf("lipc-set-prop com.lab126.powerd preventScreenSaver %d", on ? 1 : 0);
-    if (system(cmd) != 0) { /* the Kindle may not allow it; the UI still works */ }
+    run_async(cmd);
     g_free(cmd);
 }
 
@@ -602,7 +621,7 @@ static void native_keyboard(gboolean open) {
     char *cmd = open
         ? g_strdup_printf("lipc-set-prop com.lab126.keyboard open %s:abc:1", APP_ID)
         : g_strdup_printf("lipc-set-prop com.lab126.keyboard close %s", APP_ID);
-    if (system(cmd) != 0) { /* ignore */ }
+    run_async(cmd);
     g_free(cmd);
 }
 
@@ -812,7 +831,7 @@ static void finish_turn(void) {
         request_path = NULL;
     }
     if (cfg.refresh_cmd && *cfg.refresh_cmd) {
-        if (system(cfg.refresh_cmd) != 0) { /* refresh is best effort */ }
+        run_async(cfg.refresh_cmd);
     }
 }
 
