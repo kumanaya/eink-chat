@@ -94,6 +94,10 @@ static void widget_add_class(GtkWidget *w, const char *cls) {
 #endif
 }
 
+static void widget_set_id(GtkWidget *w, const char *name) {
+    gtk_widget_set_name(w, name);
+}
+
 static void label_set_xalign(GtkWidget *label, float x) {
 #if GTK_MAJOR_VERSION >= 3
     gtk_label_set_xalign(GTK_LABEL(label), x);
@@ -155,8 +159,25 @@ static void load_style(void) {
     g_free(css);
 #else
     char *rc = g_strdup_printf(
-        "style \"chatui-font\" { font_name = \"Sans %d\" }\n"
-        "widget_class \"*\" style \"chatui-font\"\n",
+        "style \"chatui-base\" {\n"
+        "  font_name = \"Sans %d\"\n"
+        "  fg[NORMAL] = \"#000000\"\n"
+        "  text[NORMAL] = \"#000000\"\n"
+        "  bg[NORMAL] = \"#ffffff\"\n"
+        "  base[NORMAL] = \"#ffffff\"\n"
+        "}\n"
+        "style \"chatui-header\" {\n"
+        "  bg[NORMAL] = \"#111111\"\n"
+        "  fg[NORMAL] = \"#ffffff\"\n"
+        "  text[NORMAL] = \"#ffffff\"\n"
+        "}\n"
+        "style \"chatui-key\" {\n"
+        "  bg[NORMAL] = \"#e8e8e8\"\n"
+        "  fg[NORMAL] = \"#000000\"\n"
+        "}\n"
+        "widget_class \"*\" style \"chatui-base\"\n"
+        "widget \"*chatui-header*\" style \"chatui-header\"\n"
+        "widget \"*chatui-key*\" style \"chatui-key\"\n",
         cfg.font_size);
     gtk_rc_parse_string(rc);
     g_free(rc);
@@ -344,6 +365,7 @@ static GtkWidget *add_bubble(const char *role, const char *text) {
     gboolean user = g_strcmp0(role, "user") == 0;
 
     style_bubble(bubble, role);
+    widget_set_id(bubble, "chatui-bubble");
     gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
     gtk_label_set_line_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
     gtk_label_set_selectable(GTK_LABEL(label), FALSE);
@@ -456,6 +478,7 @@ static void keyboard_key(GtkWidget *btn, gpointer data) {
 static GtkWidget *kbd_button(const char *label, const char *action, gboolean wide) {
     GtkWidget *btn = gtk_button_new_with_label(label);
     gtk_widget_set_size_request(btn, wide ? 200 : 34, 44);
+    widget_set_id(btn, "chatui-key");
     g_signal_connect(btn, "clicked", G_CALLBACK(keyboard_key), (gpointer)action);
     return btn;
 }
@@ -902,6 +925,7 @@ static void build_ui(void) {
 
     GtkWidget *header = gtk_event_box_new();
     style_header(header);
+    widget_set_id(header, "chatui-header");
     GtkWidget *header_row = box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_container_add(GTK_CONTAINER(header), header_row);
     GtkWidget *title = gtk_label_new("E-INK CHAT");
@@ -919,7 +943,12 @@ static void build_ui(void) {
     transcript = box_new(GTK_ORIENTATION_VERTICAL, 2);
     scrolled = gtk_scrolled_window_new(NULL, NULL);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+#if GTK_MAJOR_VERSION >= 3
     gtk_container_add(GTK_CONTAINER(scrolled), transcript);
+#else
+    /* GTK 2 will not take a plain box; it wants the viewport. */
+    gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(scrolled), transcript);
+#endif
     vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled));
     gtk_box_pack_start(GTK_BOX(root), scrolled, TRUE, TRUE, 0);
 
@@ -951,6 +980,17 @@ static void build_ui(void) {
     g_signal_connect(window, "destroy", G_CALLBACK(on_destroy), NULL);
 
     if (!cfg.keyboard_on) widget_set_visible(kbd_box, FALSE);
+    add_bubble("bot", "Ask something. The model runs on this Kindle.");
+}
+
+/* The backend starts after the first paint: the LIPC calls and the spawn are
+ * synchronous, and doing them before gtk_main can leave a white window up. */
+static gboolean start_backend(gpointer data) {
+    (void)data;
+    native_keyboard(TRUE);
+    powerd_keepalive(TRUE);
+    backend_init();
+    return FALSE;
 }
 
 /* --- self test ------------------------------------------------------------ */
@@ -1051,9 +1091,7 @@ int main(int argc, char **argv) {
     gtk_widget_show_all(window);
     if (cfg.fullscreen) gtk_window_fullscreen(GTK_WINDOW(window));
 
-    native_keyboard(TRUE);
-    powerd_keepalive(TRUE);
-    backend_init();
+    g_idle_add(start_backend, NULL);
 
     gtk_main();
     g_ptr_array_free(history, TRUE);
