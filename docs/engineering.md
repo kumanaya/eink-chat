@@ -418,6 +418,10 @@ pixels drawn by hand.
   and speaks the OpenAI-compatible `/v1/chat/completions` with
   `"stream": true`, parsing the SSE deltas; the process stays warm and the
   1024-token context lives in the server.
+- **Window title.** The Kindle's awesome WM only manages windows titled in the
+  lab126 key-value format, `L:A_N:application_PC:N_ID:<app>`; a plain title
+  leaves the window unmanaged and the panel shows the white root. The app title
+  is set to that format on the device and stays plain on the PC.
 - **E-ink.** GTK draws through X; the refresh strategy is the framework's.
   `--refresh-cmd` exists so a full-panel refresh (`fbink -s`) can run after each
   answer, where ghosting accumulates.

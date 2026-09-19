@@ -935,7 +935,13 @@ static void build_ui(void) {
     load_style();
 
     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(window), "E-INK CHAT");
+    /* The Kindle's awesome WM only manages windows titled in the lab126
+     * key-value format; a plain title leaves the app unmanaged and the panel
+     * shows the white root window. PC:N asks for no chrome (no top bar). */
+    gtk_window_set_title(GTK_WINDOW(window),
+                         g_file_test("/mnt/us", G_FILE_TEST_IS_DIR)
+                             ? "L:A_N:application_PC:N_ID:com.kumanaya.einkchat"
+                             : "E-INK CHAT");
     gtk_window_set_default_size(GTK_WINDOW(window), 600, 800);
     if (!cfg.fullscreen) gtk_window_set_decorated(GTK_WINDOW(window), TRUE);
 
