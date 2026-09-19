@@ -60,6 +60,9 @@ local function step(desc, fn)
 end
 
 local function makeStoryStub()
+    -- The harness reuses KCHAT_APP_DIR across runs. A leftover .gguf would
+    -- make run-model.sh pick llama.cpp and ignore this stub.
+    os.execute("rm -f " .. APP_DIR .. "/model/*.gguf " .. APP_DIR .. "/llama-completion")
     write_file(APP_DIR .. "/llama", [[#!/bin/sh
 echo "Once upon a time, there was a stub robot."
 echo "The stub robot was happy."
@@ -111,8 +114,9 @@ UIManager:scheduleIn(3, function()
         assert(dialog.scroller.text_widget, "no text widget inside the scroller")
     end)
 
-    step("the dialog has the input and clear buttons", function()
+    step("the dialog has the input, stop and clear buttons", function()
         assert(dialog.write_button, "no write button")
+        assert(dialog.stop_button, "no stop button")
         assert(dialog.clear_button, "no clear button")
     end)
 

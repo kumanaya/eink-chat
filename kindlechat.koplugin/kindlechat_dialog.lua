@@ -7,6 +7,11 @@ scrolling, the scrollbar and the e-ink refresh come for free, and the InputDialo
 brings KOReader's on-screen keyboard -- which is the whole reason this is a
 plugin instead of a hand-drawn framebuffer UI.
 
+The chrome is kept sparse on purpose. A 600x800 8-bpp panel (the qemu-kindle4
+machine, and every Kindle in that family) ghosts on grey and on extra widgets, so
+the conversation is black type on white, one primary action, and a Stop that
+only exists while the model is writing.
+
 Two modes, picked by what is installed:
 
   chat   a .gguf is present, so llama.cpp runs an instruct model that answers.
@@ -49,6 +54,11 @@ local MAX_DISPLAY_CHARS = 8000
 
 local SYSTEM_PROMPT = "You are a helpful assistant."
 
+local EMPTY_CHAT = "Ask a question.\nThe model runs on this Kindle. Nothing leaves the device."
+local EMPTY_STORY = "Write the first line.\nThe model will continue the story from there."
+local IDLE_CHAT = "Ask a question."
+local IDLE_STORY = "Write the next line."
+
 -- ChatML, which is what SmolLM2-Instruct uses. Changing the model means changing
 -- this (Gemma uses <start_of_turn>user ... <end_of_turn>, for instance).
 local function chatml(messages)
@@ -78,13 +88,15 @@ function ChatDialog:init()
 
     self.messages = self.messages or {}
 
-    self.face = Font:getFace("cfont", 20)
+    -- 22 px reads at arm's length on a 600x800 panel without crowding the
+    -- title bar. cfont is KOReader's body face: hinted, high-contrast.
+    self.face = Font:getFace("cfont", 22)
     self.status_face = Font:getFace("smallinfofont")
-    self.status_text = ""
+    self.status_text = self.chat_mode and _(IDLE_CHAT) or _(IDLE_STORY)
 
     self.title_bar = TitleBar:new{
         width = self.screen_w,
-        title = self.chat_mode and _("E-INK HACK") or _("E-INK HACK (stories)"),
+        title = self.chat_mode and _("Chat") or _("Stories"),
         with_bottom_line = true,
         close_callback = function() UIManager:close(self) end,
         show_parent = self,
@@ -97,28 +109,44 @@ function ChatDialog:init()
     }
 
     self.write_button = Button:new{
-        text = _("Write"),
-        callback = function() self:showInput() end,
+        text = self.chat_mode and _("Ask") or _("Write"),
+        callback = function()
+            if not self.generating then self:showInput() end
+        end,
+        show_parent = self,
+    }
+    self.stop_button = Button:new{
+        text = _("Stop"),
+        enabled = false,
+        callback = function() self:stop() end,
+        show_parent = self,
     }
     self.clear_button = Button:new{
         text = _("Clear"),
         callback = function()
+            if self.generating then return end
             self.transcript = ""
             self.messages = {}
+            self:setStatus(self.chat_mode and _(IDLE_CHAT) or _(IDLE_STORY))
             self:refreshView()
         end,
+        show_parent = self,
     }
 
     self:buildLayout()
+    self:setBusy(false)
 end
 
 function ChatDialog:buildLayout()
     local span = Size.span.vertical_default
+    local gap = Size.span.horizontal_default
     local button_row = CenterContainer:new{
         dimen = Geom:new{ w = self.screen_w, h = self.write_button:getSize().h },
         HorizontalGroup:new{
             self.write_button,
-            HorizontalSpan:new{ width = Size.span.horizontal_default },
+            HorizontalSpan:new{ width = gap },
+            self.stop_button,
+            HorizontalSpan:new{ width = gap },
             self.clear_button,
         },
     }
@@ -134,7 +162,7 @@ function ChatDialog:buildLayout()
     end
 
     self.scroller = ScrollTextWidget:new{
-        text = self.transcript,
+        text = self:displayText(),
         face = self.face,
         width = self.screen_w - 2 * Size.padding.default,
         height = body_height,
@@ -168,11 +196,46 @@ function ChatDialog:setStatus(text)
     UIManager:setDirty(self, "ui")
 end
 
+function ChatDialog:displayText()
+    if self.transcript ~= "" then
+        return self.transcript
+    end
+    return self.chat_mode and _(EMPTY_CHAT) or _(EMPTY_STORY)
+end
+
+local function setEnabled(btn, on)
+    if not btn then return end
+    if on then
+        if btn.enable then btn:enable() else btn.enabled = true end
+    else
+        if btn.disable then btn:disable() else btn.enabled = false end
+    end
+end
+
+function ChatDialog:setBusy(busy)
+    setEnabled(self.write_button, not busy)
+    setEnabled(self.stop_button, busy)
+    setEnabled(self.clear_button, not busy)
+end
+
+function ChatDialog:stop()
+    if not self.generating then return end
+    if self.cancel_generation then
+        self.cancel_generation()
+        self.cancel_generation = nil
+    end
+    self.generating = false
+    self:setBusy(false)
+    self:setStatus(_("Stopped."))
+end
+
 function ChatDialog:refreshView()
     if self.scroller and self.scroller.text_widget then
-        self.scroller.text_widget:setText(self.transcript)
+        self.scroller.text_widget:setText(self:displayText())
         self.scroller:updateScrollBar()
-        self.scroller:scrollToBottom()
+        if self.transcript ~= "" then
+            self.scroller:scrollToBottom()
+        end
     end
     UIManager:setDirty(self, "ui")
 end
@@ -251,10 +314,10 @@ end
 
 function ChatDialog:showInput()
     if not self.input_dialog then
-        local placeholder = self.chat_mode and _("Ask something.")
+        local placeholder = self.chat_mode and _("Ask a question.")
             or _("Write the next part of the story.")
         self.input_dialog = InputDialog:new{
-            title = _("E-INK HACK"),
+            title = self.chat_mode and _("Ask") or _("Write"),
             input = "",
             description = placeholder,
             buttons = {
@@ -290,8 +353,10 @@ function ChatDialog:send(text)
 
     if self.chat_mode then
         table.insert(self.messages, { role = "user", text = text })
+        -- "You" / ">" keeps the turn scannable on a 8-bpp panel; the probe
+        -- still matches the "> " user line.
         self.transcript = self.transcript .. (self.transcript == "" and "" or "\n\n")
-            .. "> " .. text
+            .. "You\n> " .. text
     else
         self.transcript = self.transcript .. text .. "\n"
     end
@@ -303,7 +368,13 @@ end
 
 function ChatDialog:generate()
     self.generating = true
-    self:setStatus(_("Generating..."))
+    self:setBusy(true)
+    self:setStatus(_("Writing..."))
+
+    if self.chat_mode then
+        self.transcript = self.transcript .. "\nKindle\n"
+        self:refreshView()
+    end
 
     local prompt = self:buildPrompt()
     -- Everything before this point is ours; the model's output is appended after.
@@ -317,17 +388,17 @@ function ChatDialog:generate()
         temp = self.temp,
         topp = self.topp,
     }, function(partial)
-        self.transcript = self.transcript:sub(1, keep)
-            .. (self.chat_mode and "\n" or "") .. partial
+        self.transcript = self.transcript:sub(1, keep) .. partial
         self:refreshView()
     end, function(_text, toks, err, load, mem)
         self.generating = false
         self.cancel_generation = nil
+        self:setBusy(false)
 
         local reply = self.transcript:sub(keep + 1):gsub("^%s+", ""):gsub("%s+$", "")
         if self.chat_mode then
             table.insert(self.messages, { role = "assistant", text = reply })
-            self.transcript = self.transcript:sub(1, keep) .. "\n" .. reply
+            self.transcript = self.transcript:sub(1, keep) .. reply
         elseif not self.transcript:match("\n$") then
             self.transcript = self.transcript .. "\n"
         end
@@ -342,7 +413,11 @@ function ChatDialog:generate()
             if toks and toks ~= "?" then parts[#parts + 1] = string.format("%s tok/s", toks) end
             if load and load ~= "?" then parts[#parts + 1] = string.format("load %ss", load) end
             if mem and mem ~= "?" then parts[#parts + 1] = string.format("%s MB free", mem) end
-            self:setStatus(table.concat(parts, "  |  "))
+            if #parts == 0 then
+                self:setStatus(self.chat_mode and _(IDLE_CHAT) or _(IDLE_STORY))
+            else
+                self:setStatus(table.concat(parts, "  |  "))
+            end
         end
         self:refreshView()
     end)
