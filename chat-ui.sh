@@ -51,6 +51,12 @@ fi
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] start $BIN" >> "$LOG" 2>&1
 
+# Ghosting: streamed text leaves residue, so a full panel refresh runs after
+# each answer. Set REFRESH_CMD to override it, or to "" to turn it off.
+if [ -z "${REFRESH_CMD+x}" ] && [ -n "$FBINK" ]; then
+    REFRESH_CMD="$FBINK -q -s"
+fi
+
 if [ -n "${REFRESH_CMD:-}" ]; then
     set -- --refresh-cmd "$REFRESH_CMD" "$@"
 fi

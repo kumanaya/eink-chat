@@ -32,7 +32,7 @@
 #define CHATUI_VERSION "0.2.0"
 #define APP_ID "com.kumanaya.einkchat"
 #define DEFAULT_APP_DIR "/mnt/us/extensions/kindlechat"
-#define DEFAULT_SYSTEM "You are a helpful assistant running on a Kindle e-reader. Answer in plain text, briefly."
+#define DEFAULT_SYSTEM "You are a helpful assistant running on a Kindle e-reader. Answer in plain text, at most three short sentences."
 
 /* --- configuration -------------------------------------------------------- */
 
@@ -56,7 +56,7 @@ static struct {
     .app_dir = DEFAULT_APP_DIR,
     .host = "127.0.0.1",
     .port = 8080,
-    .font_size = 15,
+    .font_size = 16,
     .max_turns = 10,
     .keyboard_on = TRUE,
 };
@@ -145,9 +145,10 @@ static void load_style(void) {
         ".header { background-color: #111111; padding: 6px 10px; }\n"
         ".header label { color: #ffffff; font-weight: bold; font-size: %dpx; }\n"
         ".header .status { font-size: %dpx; font-weight: normal; }\n"
-        ".bubble { border-radius: 10px; padding: 8px 10px; margin: 3px 8px; font-size: %dpx; }\n"
-        ".bubble.user { background-color: #dcdcdc; margin-left: 70px; }\n"
-        ".bubble.bot { background-color: #f4f4f4; border: 1px solid #b0b0b0; margin-right: 70px; }\n"
+        ".bubble { padding: 8px 10px; margin: 3px 8px; font-size: %dpx; }\n"
+        ".bubble.user { background-color: #e4e4e4; margin-left: 64px; }\n"
+        ".bubble.bot { background-color: #ffffff; margin-right: 64px; }\n"
+        ".bubbleborder { background-color: #111111; }\n"
         ".keyboard { padding: 2px 4px 6px 4px; }\n"
         "#entry { font-size: %dpx; }",
         cfg.font_size, cfg.font_size - 3, cfg.font_size, cfg.font_size);
@@ -201,9 +202,21 @@ static void style_bubble(GtkWidget *bubble, const char *role) {
     g_free(cls);
 #else
     GdkColor c;
-    if (g_strcmp0(role, "user") == 0) gdk_color_parse("#dcdcdc", &c);
-    else gdk_color_parse("#f4f4f4", &c);
+    if (g_strcmp0(role, "user") == 0) gdk_color_parse("#e4e4e4", &c);
+    else gdk_color_parse("#ffffff", &c);
     gtk_widget_modify_bg(bubble, GTK_STATE_NORMAL, &c);
+#endif
+}
+
+/* The bot bubble gets a 1px black frame: an outer event box painted black,
+ * the inner one holding the text. */
+static void style_border(GtkWidget *w) {
+#if GTK_MAJOR_VERSION >= 3
+    widget_add_class(w, "bubbleborder");
+#else
+    GdkColor black;
+    gdk_color_parse("#111111", &black);
+    gtk_widget_modify_bg(w, GTK_STATE_NORMAL, &black);
 #endif
 }
 
@@ -227,7 +240,7 @@ static GPtrArray *history; /* Message* */
 static Turn *turn;
 static gboolean streaming;
 
-static GtkWidget *window, *transcript, *scrolled, *entry, *send_btn, *stop_btn;
+static GtkWidget *window, *transcript, *scrolled, *entry, *send_btn, *stop_btn, *new_btn;
 static GtkWidget *status_label, *kbd_box, *shift_btn;
 static GtkAdjustment *vadj;
 static char *request_path;
@@ -357,27 +370,42 @@ static char *sse_error_message(const char *line) {
 
 static void scroll_to_bottom(void);
 
+#define WELCOME "Ask something. The model runs on this Kindle."
+
 static GtkWidget *add_bubble(const char *role, const char *text) {
+    gboolean user = g_strcmp0(role, "user") == 0;
     GtkWidget *row = box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     GtkWidget *spacer = box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     GtkWidget *bubble = gtk_event_box_new();
+    GtkWidget *content = box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *who = gtk_label_new(NULL);
     GtkWidget *label = gtk_label_new(text);
-    gboolean user = g_strcmp0(role, "user") == 0;
 
-    style_bubble(bubble, role);
-    widget_set_id(bubble, "chatui-bubble");
+    gtk_label_set_markup(GTK_LABEL(who), user ? "<small>You</small>" : "<small>Kindle</small>");
+    label_set_xalign(who, 0.0f);
+    label_set_xalign(label, 0.0f);
+    label_set_padding(who, 10, 1);
+    label_set_padding(label, 10, 4);
     gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
     gtk_label_set_line_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
     gtk_label_set_selectable(GTK_LABEL(label), FALSE);
-    label_set_xalign(label, 0.0f);
-    label_set_padding(label, 8, 4);
-    gtk_container_add(GTK_CONTAINER(bubble), label);
-    gtk_container_set_border_width(GTK_CONTAINER(bubble), 1);
+    gtk_box_pack_start(GTK_BOX(content), who, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(content), label, FALSE, FALSE, 0);
 
     if (user) {
+        style_bubble(bubble, "user");
+        widget_set_id(bubble, "chatui-bubble");
+        gtk_container_add(GTK_CONTAINER(bubble), content);
         gtk_box_pack_start(GTK_BOX(row), spacer, TRUE, TRUE, 0);
         gtk_box_pack_end(GTK_BOX(row), bubble, FALSE, FALSE, 6);
     } else {
+        GtkWidget *inner = gtk_event_box_new();
+        style_border(bubble);
+        style_bubble(inner, "bot");
+        widget_set_id(inner, "chatui-bubble");
+        gtk_container_set_border_width(GTK_CONTAINER(bubble), 1);
+        gtk_container_add(GTK_CONTAINER(inner), content);
+        gtk_container_add(GTK_CONTAINER(bubble), inner);
         gtk_box_pack_start(GTK_BOX(row), bubble, FALSE, FALSE, 6);
         gtk_box_pack_end(GTK_BOX(row), spacer, TRUE, TRUE, 0);
     }
@@ -385,6 +413,17 @@ static GtkWidget *add_bubble(const char *role, const char *text) {
     gtk_widget_show_all(row);
     scroll_to_bottom();
     return label;
+}
+
+static void clear_chat(GtkWidget *btn, gpointer data) {
+    (void)btn;
+    (void)data;
+    if (streaming) return;
+    GList *kids = gtk_container_get_children(GTK_CONTAINER(transcript));
+    for (GList *l = kids; l; l = l->next) gtk_widget_destroy(GTK_WIDGET(l->data));
+    g_list_free(kids);
+    g_ptr_array_set_size(history, 0);
+    add_bubble("bot", WELCOME);
 }
 
 static gboolean scroll_idle(gpointer data) {
@@ -408,9 +447,11 @@ static void scroll_to_bottom(void) {
 
 static const char *kbd_rows[] = { "1234567890", "qwertyuiop", "asdfghjkl" };
 static const char *kbd_row3 = "zxcvbnm";
+static const char *sym_rows[] = { "!@#$%^&*()", "-_=+[]{}\\|", ";:'\"<>,.?/" };
 static GPtrArray *kbd_letters; /* GtkButton* in the same order as the chars */
 static GString *kbd_chars;
 static gboolean shift_on;
+static GtkWidget *kbd_letters_box, *kbd_symbols_box;
 
 static void entry_insert(const char *s) {
     GtkEditable *ed = GTK_EDITABLE(entry);
@@ -472,15 +513,50 @@ static void keyboard_key(GtkWidget *btn, gpointer data) {
         return;
     }
     const char *label = gtk_button_get_label(GTK_BUTTON(btn));
-    if (label) entry_insert(label);
+    if (label) {
+        entry_insert(label);
+        /* one-shot shift, like a phone keyboard */
+        if (shift_on) {
+            shift_on = FALSE;
+            apply_shift();
+        }
+    }
+}
+
+static void keyboard_layer(gboolean symbols) {
+    widget_set_visible(kbd_letters_box, !symbols);
+    widget_set_visible(kbd_symbols_box, symbols);
+}
+
+static void keyboard_toggle_layer(GtkWidget *btn, gpointer data) {
+    (void)btn;
+    (void)data;
+    keyboard_layer(widget_is_visible(kbd_letters_box));
 }
 
 static GtkWidget *kbd_button(const char *label, const char *action, gboolean wide) {
     GtkWidget *btn = gtk_button_new_with_label(label);
-    gtk_widget_set_size_request(btn, wide ? 200 : 34, 44);
+    gtk_widget_set_size_request(btn, wide ? 200 : 36, 46);
     widget_set_id(btn, "chatui-key");
     g_signal_connect(btn, "clicked", G_CALLBACK(keyboard_key), (gpointer)action);
     return btn;
+}
+
+static GtkWidget *kbd_special(const char *label, const char *action) {
+    GtkWidget *btn = gtk_button_new_with_label(label);
+    gtk_widget_set_size_request(btn, 56, 46);
+    widget_set_id(btn, "chatui-key");
+    g_signal_connect(btn, "clicked", G_CALLBACK(keyboard_key), (gpointer)action);
+    return btn;
+}
+
+static GtkWidget *kbd_row_from(const char *chars) {
+    GtkWidget *row = box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    for (const char *c = chars; *c; c++) {
+        char label[2] = { *c, 0 };
+        gtk_box_pack_start(GTK_BOX(row), kbd_button(label, "", FALSE), TRUE, TRUE, 0);
+    }
+    return row;
 }
 
 static GtkWidget *build_keyboard(void) {
@@ -489,6 +565,8 @@ static GtkWidget *build_keyboard(void) {
     kbd_letters = g_ptr_array_new();
     kbd_chars = g_string_new(NULL);
 
+    /* Letter layer */
+    kbd_letters_box = box_new(GTK_ORIENTATION_VERTICAL, 2);
     for (guint r = 0; r < G_N_ELEMENTS(kbd_rows); r++) {
         GtkWidget *row = box_new(GTK_ORIENTATION_HORIZONTAL, 2);
         for (const char *c = kbd_rows[r]; *c; c++) {
@@ -498,11 +576,10 @@ static GtkWidget *build_keyboard(void) {
             g_string_append_c(kbd_chars, *c);
             gtk_box_pack_start(GTK_BOX(row), btn, TRUE, TRUE, 0);
         }
-        gtk_box_pack_start(GTK_BOX(box), row, TRUE, TRUE, 0);
+        gtk_box_pack_start(GTK_BOX(kbd_letters_box), row, TRUE, TRUE, 0);
     }
-
     GtkWidget *row3 = box_new(GTK_ORIENTATION_HORIZONTAL, 2);
-    shift_btn = kbd_button("Shift", "shift", FALSE);
+    shift_btn = kbd_special("Shift", "shift");
     gtk_box_pack_start(GTK_BOX(row3), shift_btn, FALSE, FALSE, 0);
     for (const char *c = kbd_row3; *c; c++) {
         char label[2] = { *c, 0 };
@@ -511,16 +588,41 @@ static GtkWidget *build_keyboard(void) {
         g_string_append_c(kbd_chars, *c);
         gtk_box_pack_start(GTK_BOX(row3), btn, TRUE, TRUE, 0);
     }
-    gtk_box_pack_start(GTK_BOX(row3), kbd_button("Bksp", "bksp", FALSE), FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(box), row3, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(row3), kbd_special("Bksp", "bksp"), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(kbd_letters_box), row3, TRUE, TRUE, 0);
 
     GtkWidget *row4 = box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    GtkWidget *sym_toggle = gtk_button_new_with_label("?123");
+    gtk_widget_set_size_request(sym_toggle, 56, 46);
+    widget_set_id(sym_toggle, "chatui-key");
+    g_signal_connect(sym_toggle, "clicked", G_CALLBACK(keyboard_toggle_layer), NULL);
+    gtk_box_pack_start(GTK_BOX(row4), sym_toggle, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(row4), kbd_button(",", "", FALSE), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(row4), kbd_button("Space", "space", TRUE), TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(row4), kbd_button(".", "", FALSE), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(row4), kbd_button("Enter", "enter", FALSE), FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(box), row4, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(kbd_letters_box), row4, TRUE, TRUE, 0);
 
+    /* Symbols layer */
+    kbd_symbols_box = box_new(GTK_ORIENTATION_VERTICAL, 2);
+    for (guint r = 0; r < G_N_ELEMENTS(sym_rows); r++) {
+        gtk_box_pack_start(GTK_BOX(kbd_symbols_box), kbd_row_from(sym_rows[r]), TRUE, TRUE, 0);
+    }
+    GtkWidget *srow4 = box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    GtkWidget *abc_toggle = gtk_button_new_with_label("ABC");
+    gtk_widget_set_size_request(abc_toggle, 56, 46);
+    widget_set_id(abc_toggle, "chatui-key");
+    g_signal_connect(abc_toggle, "clicked", G_CALLBACK(keyboard_toggle_layer), NULL);
+    gtk_box_pack_start(GTK_BOX(srow4), abc_toggle, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(srow4), kbd_button(",", "", FALSE), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(srow4), kbd_button("Space", "space", TRUE), TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(srow4), kbd_button(".", "", FALSE), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(srow4), kbd_special("Bksp", "bksp"), FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(kbd_symbols_box), srow4, TRUE, TRUE, 0);
+
+    gtk_box_pack_start(GTK_BOX(box), kbd_letters_box, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), kbd_symbols_box, FALSE, FALSE, 0);
+    widget_set_visible(kbd_symbols_box, FALSE);
     return box;
 }
 
@@ -853,7 +955,9 @@ static void finish_turn(void) {
     streaming = FALSE;
     gtk_widget_set_sensitive(entry, TRUE);
     gtk_widget_set_sensitive(send_btn, TRUE);
+    gtk_widget_set_sensitive(new_btn, TRUE);
     widget_set_visible(stop_btn, FALSE);
+    set_status(server_ready ? "ready" : "offline");
     gtk_widget_grab_focus(entry);
 
     if (request_path) {
@@ -930,8 +1034,9 @@ static void send_clicked(GtkWidget *btn, gpointer data) {
     streaming = TRUE;
     gtk_widget_set_sensitive(entry, FALSE);
     gtk_widget_set_sensitive(send_btn, FALSE);
+    gtk_widget_set_sensitive(new_btn, FALSE);
     widget_set_visible(stop_btn, TRUE);
-    set_status("thinking...");
+    set_status("writing...");
 
     GString *request = build_request();
     start_stream(request);
@@ -988,7 +1093,12 @@ static void build_ui(void) {
     gtk_box_pack_start(GTK_BOX(header_row), title, FALSE, FALSE, 0);
     status_label = gtk_label_new("starting...");
     widget_add_class(status_label, "status");
-    gtk_box_pack_end(GTK_BOX(header_row), status_label, FALSE, FALSE, 0);
+    new_btn = gtk_button_new_with_label("New");
+    gtk_widget_set_size_request(new_btn, 56, 40);
+    widget_set_id(new_btn, "chatui-key");
+    g_signal_connect(new_btn, "clicked", G_CALLBACK(clear_chat), NULL);
+    gtk_box_pack_end(GTK_BOX(header_row), new_btn, FALSE, FALSE, 0);
+    gtk_box_pack_end(GTK_BOX(header_row), status_label, FALSE, FALSE, 8);
     label_set_padding(title, 8, 6);
     label_set_padding(status_label, 8, 6);
     gtk_widget_set_size_request(header, -1, 46);
@@ -1035,15 +1145,15 @@ static void build_ui(void) {
     g_signal_connect(send_btn, "clicked", G_CALLBACK(send_clicked), NULL);
     g_signal_connect(stop_btn, "clicked", G_CALLBACK(stop_clicked), NULL);
     g_signal_connect(window, "destroy", G_CALLBACK(on_destroy), NULL);
-
-    if (!cfg.keyboard_on) widget_set_visible(kbd_box, FALSE);
-    add_bubble("bot", "Ask something. The model runs on this Kindle.");
 }
 
 /* The backend starts after the first paint: the LIPC calls and the spawn are
  * synchronous, and doing them before gtk_main can leave a white window up. */
 static gboolean start_backend(gpointer data) {
     (void)data;
+    if (!cfg.keyboard_on) widget_set_visible(kbd_box, FALSE);
+    keyboard_layer(FALSE);
+    add_bubble("bot", WELCOME);
     native_keyboard(TRUE);
     powerd_keepalive(TRUE);
     backend_init();

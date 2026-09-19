@@ -94,9 +94,12 @@ chat-ui.sh          →  /mnt/us/documents/chat-ui.sh
 Eject. It shows up as **E-INK HACK CHAT**. The window is GTK over the X server
 the framework already runs, so the transcript, the scrolling and the keyboard
 are ordinary widgets; the answer streams in as chat bubbles while the model
-writes. It starts and stops `llama-server` itself when nothing is listening on
-`127.0.0.1:8080`, and brings its own QWERTY (with shift and backspace). To use
-the framework's keyboard instead, start it once with `--native-keyboard`.
+writes. The header shows the status and a **New** button that clears the
+conversation; the on-screen QWERTY has a shift key and a symbols layer, and
+after each answer the launcher issues a full panel refresh (`fbink -q -s`, from
+`REFRESH_CMD`) so streaming does not leave ghosting. It starts and stops
+`llama-server` itself when nothing is listening on `127.0.0.1:8080`. To use the
+framework's keyboard instead, start it once with `--native-keyboard`.
 
 Build the window with `sh tools/build-chatui.sh --kindle` (koxtoolchain plus
 the Kindle SDK, which brings GTK 2 into the sysroot; the script prints the
