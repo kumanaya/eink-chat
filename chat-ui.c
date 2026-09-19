@@ -578,8 +578,35 @@ static char *find_server_bin(void) {
     if (cfg.server_bin) return g_strdup(cfg.server_bin);
     char *local = g_build_filename(cfg.app_dir, "llama-server", NULL);
     char *found = NULL;
-    if (g_file_test(local, G_FILE_TEST_IS_EXECUTABLE)) found = g_strdup(local);
-    else found = g_find_program_in_path("llama-server");
+    if (g_file_test(local, G_FILE_TEST_IS_REGULAR)) {
+        if (g_file_test(local, G_FILE_TEST_IS_EXECUTABLE)) {
+            found = g_strdup(local);
+        } else {
+            /* vfat (or a strict mount) may not carry the x bit: run a copy
+             * from /tmp, which always does. */
+            gchar *tmp = g_strdup("/tmp/eink-chat-server-XXXXXX");
+            gint fd = g_mkstemp(tmp);
+            gchar *data = NULL;
+            gsize len = 0;
+            GError *err = NULL;
+            if (fd >= 0 && g_file_get_contents(local, &data, &len, &err) &&
+                g_file_set_contents(tmp, data, (gssize)len, &err)) {
+                chmod(tmp, 0755);
+                found = tmp;
+                tmp = NULL;
+            } else if (err) {
+                g_error_free(err);
+            }
+            if (fd >= 0) close(fd);
+            g_free(data);
+            if (tmp) {
+                g_unlink(tmp);
+                g_free(tmp);
+            }
+        }
+    } else {
+        found = g_find_program_in_path("llama-server");
+    }
     g_free(local);
     return found;
 }
@@ -664,6 +691,8 @@ static gboolean poll_health(gpointer data) {
 static void spawn_server(void) {
     char *model = find_model();
     char *bin = find_server_bin();
+    g_print("chat-ui: app_dir=%s model=%s server=%s\n", cfg.app_dir,
+            model ? model : "(none)", bin ? bin : "(none)");
     if (!bin || !model) {
         set_status(bin ? "no .gguf model found" : "no llama-server found");
         if (bin) g_free(bin);
@@ -711,6 +740,7 @@ static void spawn_server(void) {
     server_ready = FALSE;
     health_polls = 0;
     set_status("starting server...");
+    g_print("chat-ui: llama-server started, pid %d\n", (int)server_pid);
     g_child_watch_add(server_pid, on_server_exit, NULL);
     g_timeout_add_seconds(1, poll_health, NULL);
 }
@@ -720,6 +750,7 @@ static void backend_init(void) {
         server_ready = TRUE;
         set_status("ready");
         gtk_widget_set_sensitive(send_btn, TRUE);
+        g_print("chat-ui: server ready\n");
         return;
     }
     if (cfg.no_spawn) {
@@ -958,8 +989,9 @@ static void build_ui(void) {
     status_label = gtk_label_new("starting...");
     widget_add_class(status_label, "status");
     gtk_box_pack_end(GTK_BOX(header_row), status_label, FALSE, FALSE, 0);
-    label_set_padding(title, 4, 4);
-    label_set_padding(status_label, 4, 4);
+    label_set_padding(title, 8, 6);
+    label_set_padding(status_label, 8, 6);
+    gtk_widget_set_size_request(header, -1, 46);
     widget_set_bold(title);
     widget_set_color(title, "#ffffff");
     widget_set_color(status_label, "#ffffff");
@@ -1114,7 +1146,15 @@ int main(int argc, char **argv) {
     gtk_init(&argc, &argv);
     build_ui();
     gtk_widget_show_all(window);
-    if (cfg.fullscreen) gtk_window_fullscreen(GTK_WINDOW(window));
+    if (cfg.fullscreen) {
+#if GTK_MAJOR_VERSION >= 3
+        gtk_window_fullscreen(GTK_WINDOW(window));
+#else
+        /* kterm maximizes on the Kindle; EWMH fullscreen is not dependable
+         * under the framework's awesome. */
+        gtk_window_maximize(GTK_WINDOW(window));
+#endif
+    }
 
     g_idle_add(start_backend, NULL);
 
